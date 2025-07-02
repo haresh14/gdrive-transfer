@@ -46,7 +46,17 @@ mkdir data
 
 ### 4. Build and Run
 
-Build and start the container:
+Build Image
+```bash
+docker-compose --build
+```
+
+Start container
+```bash
+docker-compose run --rm gdrive-transfer
+```
+
+Build and start the container togather:
 
 ```bash
 docker-compose up --build
