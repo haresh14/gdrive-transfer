@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  gdrive-transfer:
+    build: .
+    container_name: gdrive-transfer
+    environment:
+      # These should be set in your .env file
+      - GDRIVE_SOURCE_FOLDER_ID=${GDRIVE_SOURCE_FOLDER_ID}
+      - GDRIVE_CREDENTIALS_JSON=${GDRIVE_CREDENTIALS_JSON}
+    volumes:
+      # Mount a local directory to persist logs and tokens
+      - ./data:/app/data
+      # Mount the script for development (optional, comment out for production)
+      - ./gdrive_transfer_script.py:/app/gdrive_transfer_script.py:ro
+    ports:
+      # Map port for OAuth authentication
+      - "8425:8425"
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    networks:
+      - gdrive-network
+
+networks:
+  gdrive-network:
+    driver: bridge 

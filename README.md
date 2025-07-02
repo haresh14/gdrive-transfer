@@ -79,6 +79,22 @@ This is the most secure way to configure the script.
 
 ### Step 5: Install Dependencies
 
+#### Option A: Local Python Installation
+
 Open your terminal or command prompt, navigate to your project folder, and run:
 ```bash
 pip install -r requirements.txt
+```
+
+#### Option B: Docker (Recommended)
+
+If you prefer not to install Python locally, you can use Docker instead:
+
+1. Make sure Docker and Docker Compose are installed on your system
+2. Run the setup script:
+   ```bash
+   ./start.sh
+   ```
+3. Follow the interactive prompts to configure and run the container
+
+For detailed Docker instructions, see `DOCKER_README.md`.

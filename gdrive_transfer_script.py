@@ -27,11 +27,16 @@ DESTINATION_PARENT_ID = 'root'
 
 # Constants
 SCOPES = ['https://www.googleapis.com/auth/drive']
-TOKEN_FILE = 'token.pickle'
+# Use data directory for token file in Docker environment
+TOKEN_DIR = os.getenv('LOG_DIR', './data')
+TOKEN_FILE = os.path.join(TOKEN_DIR, 'token.pickle')
 
 # Generate timestamped log file name
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-LOG_FILE = f'gdrive_copy_{timestamp}.log'
+# Use data directory for logs in Docker environment
+LOG_DIR = os.getenv('LOG_DIR', './data')
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, f'gdrive_copy_{timestamp}.log')
 
 # --- Global variables for progress tracking ---
 total_items = 0
@@ -75,7 +80,20 @@ def authenticate_account():
             # Load credentials from environment variable
             client_config = json.loads(GDRIVE_CREDENTIALS_JSON)
             flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
-            creds = flow.run_local_server(port=0)
+            # Use port 8425 for Docker compatibility and bind to all interfaces
+            # Don't try to open browser automatically in Docker environment
+            try:
+                creds = flow.run_local_server(port=8425, bind_addr='0.0.0.0', open_browser=False)
+            except Exception as e:
+                logging.error(f"Failed to run local server: {e}")
+                logging.info("Please visit the following URL to authorize the application:")
+                auth_url, _ = flow.authorization_url(prompt='consent')
+                logging.info(f"Authorization URL: {auth_url}")
+                logging.info("After authorization, the browser will redirect to a localhost URL.")
+                logging.info("Copy the entire redirect URL and paste it here:")
+                authorization_response = input("Paste the full redirect URL here: ")
+                flow.fetch_token(authorization_response=authorization_response)
+                creds = flow.credentials
 
         with open(TOKEN_FILE, 'wb') as token:
             pickle.dump(creds, token)
