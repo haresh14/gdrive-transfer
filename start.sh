@@ -60,9 +60,9 @@ echo ""
 
 # Ask user how they want to run
 echo "How would you like to run the transfer?"
-echo "1) Interactive mode (see logs in real-time)"
-echo "2) Background mode (detached)"
-echo "3) One-time run (run once and exit)"
+echo "1) Interactive mode (see logs in real-time, stops when complete)"
+echo "2) Background mode (detached, stops when complete)"
+echo "3) One-time run (run once and auto-remove container)"
 echo ""
 read -p "Choose an option (1-3): " choice
 

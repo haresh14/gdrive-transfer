@@ -109,8 +109,14 @@ docker-compose restart
 
 ### Run One-Time Transfer
 ```bash
-# Run and remove container after completion
+# Run and remove container after completion (recommended for single transfers)
 docker-compose run --rm gdrive-transfer
+```
+
+### Normal Run (Container stops after completion)
+```bash
+# Container will stop automatically when transfer completes
+docker-compose up --build
 ```
 
 ### Access Container Shell
