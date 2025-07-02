@@ -3,6 +3,8 @@ import json
 import pickle
 import time
 import logging
+import atexit
+from datetime import datetime
 from dotenv import load_dotenv
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -26,7 +28,10 @@ DESTINATION_PARENT_ID = 'root'
 # Constants
 SCOPES = ['https://www.googleapis.com/auth/drive']
 TOKEN_FILE = 'token.pickle'
-LOG_FILE = 'copy_log.txt'
+
+# Generate timestamped log file name
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+LOG_FILE = f'gdrive_copy_{timestamp}.log'
 
 # --- Global variables for progress tracking ---
 total_items = 0
@@ -38,10 +43,19 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(message)s',
     handlers=[
-        logging.FileHandler(LOG_FILE),
+        logging.FileHandler(LOG_FILE, mode='w', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
+
+# Function to log script termination
+def log_script_end():
+    """Log when script ends (normally or unexpectedly)."""
+    logging.info("--- Script execution ended ---")
+    logging.info(f"Log file saved as: {LOG_FILE}")
+
+# Register the cleanup function to run on script exit
+atexit.register(log_script_end)
 
 # --- Helper Functions ---
 
@@ -51,7 +65,7 @@ def authenticate_account():
     if os.path.exists(TOKEN_FILE):
         with open(TOKEN_FILE, 'rb') as token:
             creds = pickle.load(token)
-    
+
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             logging.info("Refreshing access token...")
@@ -62,11 +76,11 @@ def authenticate_account():
             client_config = json.loads(GDRIVE_CREDENTIALS_JSON)
             flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
             creds = flow.run_local_server(port=0)
-        
+
         with open(TOKEN_FILE, 'wb') as token:
             pickle.dump(creds, token)
             logging.info("Authentication successful. Token saved.")
-    
+
     return build('drive', 'v3', credentials=creds)
 
 def find_existing_item(service, name, parent_id, mime_type):
@@ -145,7 +159,7 @@ def copy_folder_recursively(service, source_folder_id, dest_parent_folder_id, in
                 if item_mime_type == 'application/vnd.google-apps.folder':
                     logging.info(f"{progress_str} {indent}📂 Processing folder: {item_name}")
                     existing_folder = find_existing_item(service, item_name, dest_parent_folder_id, item_mime_type)
-                    
+
                     if existing_folder:
                         new_folder_id = existing_folder['id']
                         logging.info(f"{progress_str} {indent}  -> Found existing folder. Skipping creation.")
@@ -154,13 +168,13 @@ def copy_folder_recursively(service, source_folder_id, dest_parent_folder_id, in
                         new_folder = service.files().create(body=new_folder_metadata, fields='id', supportsAllDrives=True).execute()
                         new_folder_id = new_folder.get('id')
                         logging.info(f"{progress_str} {indent}  -> ✅ Created new folder in your My Drive.")
-                    
+
                     copy_folder_recursively(service, item_id, new_folder_id, indent_level + 1)
 
                 else: # It's a file
                     logging.info(f"{progress_str} {indent}📄 Processing file: {item_name}...")
                     existing_file = find_existing_item(service, item_name, dest_parent_folder_id, item_mime_type)
-                    
+
                     should_copy = True
                     if existing_file:
                         # Convert sizes to integers for comparison
@@ -176,7 +190,7 @@ def copy_folder_recursively(service, source_folder_id, dest_parent_folder_id, in
                                 service.files().delete(fileId=existing_file['id'], supportsAllDrives=True).execute()
                             except HttpError as e:
                                 logging.error(f"Error deleting file: {e}")
-                    
+
                     if should_copy:
                         try:
                             copied_file = service.files().copy(
@@ -200,24 +214,36 @@ def main():
     """Main function to orchestrate the Drive transfer."""
     global total_items
     logging.info("--- Google Drive Fault-Tolerant Copy Script (Env-Friendly) ---")
-    
-    if not all([SOURCE_SHARED_FOLDER_ID, GDRIVE_CREDENTIALS_JSON]):
-        logging.error("\nERROR: Missing required environment variables.")
-        logging.error("Please ensure 'GDRIVE_SOURCE_FOLDER_ID' and 'GDRIVE_CREDENTIALS_JSON' are set in your .env file.")
-        return
+    logging.info(f"Log file: {LOG_FILE}")
+    logging.info(f"Script started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    service = authenticate_account()
-    logging.info("\nAccount authenticated successfully.")
+    try:
+        if not all([SOURCE_SHARED_FOLDER_ID, GDRIVE_CREDENTIALS_JSON]):
+            logging.error("\nERROR: Missing required environment variables.")
+            logging.error("Please ensure 'GDRIVE_SOURCE_FOLDER_ID' and 'GDRIVE_CREDENTIALS_JSON' are set in your .env file.")
+            return
 
-    logging.info("\n--- Pre-scan: Counting total files and folders... ---")
-    total_items = count_total_items(service, SOURCE_SHARED_FOLDER_ID)
-    logging.info(f"Found {total_items} total items to process.")
+        service = authenticate_account()
+        logging.info("\nAccount authenticated successfully.")
 
-    logging.info("\n--- Starting Resumable File and Folder Copy ---")
-    
-    copy_folder_recursively(service, SOURCE_SHARED_FOLDER_ID, DESTINATION_PARENT_ID)
+        logging.info("\n--- Pre-scan: Counting total files and folders... ---")
+        total_items = count_total_items(service, SOURCE_SHARED_FOLDER_ID)
+        logging.info(f"Found {total_items} total items to process.")
 
-    logging.info("\n--- Copy Complete! ---")
+        logging.info("\n--- Starting Resumable File and Folder Copy ---")
+
+        copy_folder_recursively(service, SOURCE_SHARED_FOLDER_ID, DESTINATION_PARENT_ID)
+
+        logging.info("\n--- Copy Complete! ---")
+
+    except KeyboardInterrupt:
+        logging.warning("\n--- Script interrupted by user (Ctrl+C) ---")
+        logging.info(f"Progress: {processed_items}/{total_items} items processed")
+    except Exception as e:
+        logging.error(f"\n--- Unexpected error occurred ---")
+        logging.error(f"Error: {str(e)}")
+        logging.error(f"Progress: {processed_items}/{total_items} items processed")
+        raise
 
 if __name__ == '__main__':
     main()

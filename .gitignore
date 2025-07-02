@@ -10,3 +10,6 @@ credentials.json
 # Python cache
 __pycache__/
 *.pyc
+
+# log files
+*.log
