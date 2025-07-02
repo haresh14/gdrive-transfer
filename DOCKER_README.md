@@ -186,6 +186,65 @@ Common issues:
 | `GDRIVE_CREDENTIALS_JSON` | JSON credentials from Google Cloud Console | Yes |
 | `LOG_DIR` | Directory for logs and tokens (default: ./data) | No |
 
+### Updating Environment Variables
+
+If you need to change environment variables (like switching to a different folder):
+
+1. **Edit the `.env` file** with your new values
+2. **Run the container directly** - no extra steps needed:
+   ```bash
+   docker-compose run --rm gdrive-transfer
+   ```
+3. **The container automatically uses updated environment variables**
+
+**Important Notes:**
+- Environment variables update automatically - no rebuild required
+- If you change Google credentials, delete the old token: `rm data/token.pickle`
+- Each run creates a new timestamped log file in `data/`
+- Only environment variables update, not the Python code (unless you rebuild)
+
+**Example:**
+```bash
+# 1. Change folder ID in .env file
+GDRIVE_SOURCE_FOLDER_ID="new_folder_id_here"
+
+# 2. Run immediately - uses new folder ID
+docker-compose run --rm gdrive-transfer
+```
+
+### Updating Python Code
+
+If you modify the Python script (`gdrive_transfer_script.py`), you need to rebuild the Docker image:
+
+1. **Make your changes** to `gdrive_transfer_script.py`
+2. **Rebuild the Docker image**:
+   ```bash
+   docker-compose build
+   ```
+3. **Run with the updated code**:
+   ```bash
+   docker-compose run --rm gdrive-transfer
+   ```
+
+**Alternative (rebuild and run in one step):**
+```bash
+docker-compose up --build
+```
+
+**Development Tip:**
+The `docker-compose.yml` includes a development volume mount that allows you to edit the Python file without rebuilding:
+```yml
+# This line in docker-compose.yml enables live code updates
+- ./gdrive_transfer_script.py:/app/gdrive_transfer_script.py:ro
+```
+
+With this mount active, you can:
+1. Edit `gdrive_transfer_script.py` locally
+2. Run `docker-compose run --rm gdrive-transfer` (no rebuild needed)
+3. The container uses your updated code immediately
+
+**For production**, comment out or remove the development volume mount and always rebuild after code changes.
+
 ## Security Notes
 
 - Never commit your `.env` file to version control
