@@ -28,6 +28,10 @@ GDRIVE_CREDENTIALS_JSON = os.getenv('GDRIVE_CREDENTIALS_JSON')
 _dest_env_var = os.getenv('GDRIVE_DESTINATION_PARENT_ID')
 DESTINATION_PARENT_ID = _dest_env_var.strip() if _dest_env_var and _dest_env_var.strip() else 'root'
 
+print("\nENVIRONMENT VARIABLES:")
+print(f"  GDRIVE_SOURCE_FOLDER_ID: {SOURCE_SHARED_FOLDER_ID}")
+print(f"  GDRIVE_DESTINATION_PARENT_ID: {DESTINATION_PARENT_ID}")
+
 # Constants
 SCOPES = ['https://www.googleapis.com/auth/drive']
 # Use data directory for token file in Docker environment
