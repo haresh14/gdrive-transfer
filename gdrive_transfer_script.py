@@ -4,6 +4,7 @@ import pickle
 import time
 import logging
 import atexit
+import argparse
 from datetime import datetime
 from dotenv import load_dotenv
 from google.auth.transport.requests import Request
@@ -23,7 +24,7 @@ SOURCE_SHARED_FOLDER_ID = os.getenv('GDRIVE_SOURCE_FOLDER_ID')
 GDRIVE_CREDENTIALS_JSON = os.getenv('GDRIVE_CREDENTIALS_JSON')
 
 # Destination folder in 'My Drive'. 'root' is the top level.
-DESTINATION_PARENT_ID = 'root' 
+DESTINATION_PARENT_ID = 'root'
 
 # Constants
 SCOPES = ['https://www.googleapis.com/auth/drive']
@@ -33,10 +34,52 @@ TOKEN_FILE = os.path.join(TOKEN_DIR, 'token.pickle')
 
 # Generate timestamped log file name
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-# Use data directory for logs in Docker environment
-LOG_DIR = os.getenv('LOG_DIR', './data')
-os.makedirs(LOG_DIR, exist_ok=True)
+# Use /data/log directory for logs
+LOG_DIR = '/data/log'
 LOG_FILE = os.path.join(LOG_DIR, f'gdrive_copy_{timestamp}.log')
+
+# Cache file for folder scan counts
+CACHE_DIR = os.path.join(TOKEN_DIR, 'cache')
+FOLDER_COUNT_CACHE_FILE = os.path.join(CACHE_DIR, 'folder_counts.json')
+
+# Ensure all required directories exist
+def ensure_directories():
+    """Create all required directories if they don't exist."""
+    directories = {
+        'Token directory': TOKEN_DIR,
+        'Log directory': LOG_DIR,
+        'Cache directory': CACHE_DIR
+    }
+
+    for desc, directory in directories.items():
+        try:
+            if not os.path.exists(directory):
+                os.makedirs(directory, exist_ok=True)
+                print(f"Created {desc}: {directory}")
+            else:
+                print(f"{desc} already exists: {directory}")
+
+            # Test write permissions
+            test_file = os.path.join(directory, '.write_test')
+            try:
+                with open(test_file, 'w') as f:
+                    f.write('test')
+                os.remove(test_file)
+            except Exception:
+                print(f"ERROR: {desc} is not writable: {directory}")
+                print(f"Please ensure you have write permissions to this directory.")
+                exit(1)
+
+        except PermissionError:
+            print(f"ERROR: Permission denied creating {desc}: {directory}")
+            print(f"Please ensure you have write permissions to create this directory.")
+            exit(1)
+        except Exception as e:
+            print(f"ERROR: Could not create {desc} {directory}: {e}")
+            exit(1)
+
+# Create directories at startup
+ensure_directories()
 
 # --- Global variables for progress tracking ---
 total_items = 0
@@ -63,6 +106,38 @@ def log_script_end():
 atexit.register(log_script_end)
 
 # --- Helper Functions ---
+
+def load_folder_count_cache():
+    """Load the folder count cache from disk."""
+    try:
+        if os.path.exists(FOLDER_COUNT_CACHE_FILE):
+            with open(FOLDER_COUNT_CACHE_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        logging.warning(f"Could not load folder count cache: {e}")
+    return {}
+
+def save_folder_count_cache(cache_data):
+    """Save the folder count cache to disk."""
+    try:
+        with open(FOLDER_COUNT_CACHE_FILE, 'w') as f:
+            json.dump(cache_data, f, indent=2)
+    except Exception as e:
+        logging.error(f"Could not save folder count cache: {e}")
+
+def get_cached_folder_count(folder_id):
+    """Get cached count for a folder ID, or None if not cached."""
+    cache = load_folder_count_cache()
+    return cache.get(folder_id)
+
+def cache_folder_count(folder_id, count):
+    """Cache the count for a folder ID."""
+    cache = load_folder_count_cache()
+    cache[folder_id] = {
+        'count': count,
+        'timestamp': datetime.now().isoformat()
+    }
+    save_folder_count_cache(cache)
 
 def authenticate_account():
     """Authenticates the user and returns a Drive API service object."""
@@ -231,6 +306,13 @@ def copy_folder_recursively(service, source_folder_id, dest_parent_folder_id, in
 def main():
     """Main function to orchestrate the Drive transfer."""
     global total_items
+
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Google Drive Fault-Tolerant Copy Script')
+    parser.add_argument('--force-rescan', action='store_true',
+                       help='Force re-scanning of folder contents (ignore cache)')
+    args = parser.parse_args()
+
     logging.info("--- Google Drive Fault-Tolerant Copy Script (Env-Friendly) ---")
     logging.info(f"Log file: {LOG_FILE}")
     logging.info(f"Script started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -244,9 +326,23 @@ def main():
         service = authenticate_account()
         logging.info("\nAccount authenticated successfully.")
 
-        logging.info("\n--- Pre-scan: Counting total files and folders... ---")
-        total_items = count_total_items(service, SOURCE_SHARED_FOLDER_ID)
-        logging.info(f"Found {total_items} total items to process.")
+        # Check if we have a cached count for this folder (unless force rescan is requested)
+        cached_data = get_cached_folder_count(SOURCE_SHARED_FOLDER_ID) if not args.force_rescan else None
+        if cached_data and not args.force_rescan:
+            total_items = cached_data['count']
+            cached_time = cached_data['timestamp']
+            logging.info(f"\n--- Using cached count from {cached_time} ---")
+            logging.info(f"Found {total_items} total items to process (from cache).")
+            logging.info("Use --force-rescan to force a new count if folder contents have changed.")
+        else:
+            if args.force_rescan:
+                logging.info("\n--- Force rescan requested ---")
+            logging.info("\n--- Pre-scan: Counting total files and folders... ---")
+            total_items = count_total_items(service, SOURCE_SHARED_FOLDER_ID)
+            logging.info(f"Found {total_items} total items to process.")
+            # Cache the count for future runs
+            cache_folder_count(SOURCE_SHARED_FOLDER_ID, total_items)
+            logging.info("Count cached for future runs.")
 
         logging.info("\n--- Starting Resumable File and Folder Copy ---")
 

@@ -13,3 +13,6 @@ __pycache__/
 
 # log files
 *.log
+
+# local data cache
+data

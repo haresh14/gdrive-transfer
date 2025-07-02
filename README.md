@@ -7,7 +7,8 @@ A fault-tolerant Python script to recursively copy a large, deeply-nested Google
 * **Fault-Tolerant & Resumable**: You can stop and start the script at any time. It will pick up where it left off without creating duplicate files or folders.
 * **Data Integrity Check**: Compares file sizes and re-copies any files that don't match between the source and destination.
 * **Secure**: Uses environment variables to keep your secret credentials separate from the code, making it safe to use with Git.
-* **Progress Logging**: Displays detailed progress in the terminal and saves a complete log to `copy_log.txt` for later review.
+* **Progress Logging**: Displays detailed progress in the terminal and saves a complete log to `/data/log/` directory for later review.
+* **Smart Caching**: Caches folder scan results to avoid re-scanning the same folder ID on subsequent runs, significantly improving startup time.
 * **Server-Side Copy**: Copies files directly on Google's servers without downloading them to your computer, saving bandwidth.
 
 ## Prerequisites
@@ -98,3 +99,30 @@ If you prefer not to install Python locally, you can use Docker instead:
 3. Follow the interactive prompts to configure and run the container
 
 For detailed Docker instructions, see `DOCKER_README.md`.
+
+## Running the Script
+
+### Basic Usage
+
+```bash
+python gdrive_transfer_script.py
+```
+
+### Command Line Options
+
+* `--force-rescan`: Force re-scanning of folder contents, ignoring any cached count data. Use this if the source folder contents have changed since the last run.
+
+Example:
+```bash
+python gdrive_transfer_script.py --force-rescan
+```
+
+### Caching Behavior
+
+The script automatically caches the total count of files and folders for each source folder ID. This means:
+
+- **First run**: The script will scan the entire folder structure to count files (this can take time for large folders)
+- **Subsequent runs**: The script will use the cached count, starting the copy process immediately
+- **Changed folder contents**: Use `--force-rescan` to update the cache if files have been added/removed from the source folder
+
+Cache files are stored in `./data/cache/folder_counts.json`.
