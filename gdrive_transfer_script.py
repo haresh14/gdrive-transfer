@@ -1,0 +1,223 @@
+import os
+import json
+import pickle
+import time
+import logging
+from dotenv import load_dotenv
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+# --- Configuration from Environment Variables ---
+# Load environment variables from a .env file if it exists
+load_dotenv()
+
+# The ID of the shared folder you want to copy.
+SOURCE_SHARED_FOLDER_ID = os.getenv('GDRIVE_SOURCE_FOLDER_ID')
+
+# The content of your credentials.json file.
+# It's recommended to store this as a single-line string in your .env file.
+GDRIVE_CREDENTIALS_JSON = os.getenv('GDRIVE_CREDENTIALS_JSON')
+
+# Destination folder in 'My Drive'. 'root' is the top level.
+DESTINATION_PARENT_ID = 'root' 
+
+# Constants
+SCOPES = ['https://www.googleapis.com/auth/drive']
+TOKEN_FILE = 'token.pickle'
+LOG_FILE = 'copy_log.txt'
+
+# --- Global variables for progress tracking ---
+total_items = 0
+processed_items = 0
+
+# --- Setup Logging ---
+# Configure logger to output to both console and a file
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler()
+    ]
+)
+
+# --- Helper Functions ---
+
+def authenticate_account():
+    """Authenticates the user and returns a Drive API service object."""
+    creds = None
+    if os.path.exists(TOKEN_FILE):
+        with open(TOKEN_FILE, 'rb') as token:
+            creds = pickle.load(token)
+    
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            logging.info("Refreshing access token...")
+            creds.refresh(Request())
+        else:
+            logging.info("\nPlease authenticate your Google account.")
+            # Load credentials from environment variable
+            client_config = json.loads(GDRIVE_CREDENTIALS_JSON)
+            flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
+            creds = flow.run_local_server(port=0)
+        
+        with open(TOKEN_FILE, 'wb') as token:
+            pickle.dump(creds, token)
+            logging.info("Authentication successful. Token saved.")
+    
+    return build('drive', 'v3', credentials=creds)
+
+def find_existing_item(service, name, parent_id, mime_type):
+    """Finds an existing file or folder by name and parent."""
+    # Escape single quotes in the name for the query
+    sanitized_name = name.replace("'", "\\'")
+    query = f"'{parent_id}' in parents and name = '{sanitized_name}' and mimeType = '{mime_type}' and trashed = false"
+    try:
+        response = service.files().list(
+            q=query,
+            fields='files(id, size)',
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute()
+        files = response.get('files', [])
+        return files[0] if files else None
+    except HttpError as error:
+        logging.error(f"An error occurred while searching for item '{name}': {error}")
+        return None
+
+def count_total_items(service, folder_id):
+    """Recursively counts the total number of files and folders."""
+    count = 0
+    page_token = None
+    while True:
+        try:
+            response = service.files().list(
+                q=f"'{folder_id}' in parents and trashed=false",
+                pageSize=1000,
+                fields="nextPageToken, files(id, mimeType)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                pageToken=page_token
+            ).execute()
+            items = response.get('files', [])
+            count += len(items)
+            for item in items:
+                if item['mimeType'] == 'application/vnd.google-apps.folder':
+                    count += count_total_items(service, item['id'])
+            page_token = response.get('nextPageToken', None)
+            if page_token is None:
+                break
+        except HttpError as error:
+            logging.error(f"An error occurred during item count: {error}")
+            break
+    return count
+
+def copy_folder_recursively(service, source_folder_id, dest_parent_folder_id, indent_level=0):
+    """Recursively and fault-tolerantly copies a folder and its contents."""
+    global processed_items
+    page_token = None
+    while True:
+        try:
+            results = service.files().list(
+                q=f"'{source_folder_id}' in parents and trashed=false",
+                pageSize=200,
+                fields="nextPageToken, files(id, name, mimeType, size)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                pageToken=page_token
+            ).execute()
+
+            items = results.get('files', [])
+            indent = "  " * indent_level
+
+            for item in items:
+                processed_items += 1
+                progress = (processed_items / total_items) * 100 if total_items > 0 else 0
+                progress_str = f"[{progress:6.2f}%]"
+
+                item_name = item['name']
+                item_id = item['id']
+                item_mime_type = item['mimeType']
+                source_size = item.get('size')
+
+                if item_mime_type == 'application/vnd.google-apps.folder':
+                    logging.info(f"{progress_str} {indent}📂 Processing folder: {item_name}")
+                    existing_folder = find_existing_item(service, item_name, dest_parent_folder_id, item_mime_type)
+                    
+                    if existing_folder:
+                        new_folder_id = existing_folder['id']
+                        logging.info(f"{progress_str} {indent}  -> Found existing folder. Skipping creation.")
+                    else:
+                        new_folder_metadata = {'name': item_name, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [dest_parent_folder_id]}
+                        new_folder = service.files().create(body=new_folder_metadata, fields='id', supportsAllDrives=True).execute()
+                        new_folder_id = new_folder.get('id')
+                        logging.info(f"{progress_str} {indent}  -> ✅ Created new folder in your My Drive.")
+                    
+                    copy_folder_recursively(service, item_id, new_folder_id, indent_level + 1)
+
+                else: # It's a file
+                    logging.info(f"{progress_str} {indent}📄 Processing file: {item_name}...")
+                    existing_file = find_existing_item(service, item_name, dest_parent_folder_id, item_mime_type)
+                    
+                    should_copy = True
+                    if existing_file:
+                        # Convert sizes to integers for comparison
+                        existing_size_int = int(existing_file.get('size', 0))
+                        source_size_int = int(source_size or 0)
+
+                        if existing_size_int == source_size_int:
+                            logging.info(f"{progress_str} {indent}  -> File already exists with matching size. Skipping.")
+                            should_copy = False
+                        else:
+                            logging.warning(f"{progress_str} {indent}  -> File exists with different size. Deleting and re-copying.")
+                            try:
+                                service.files().delete(fileId=existing_file['id'], supportsAllDrives=True).execute()
+                            except HttpError as e:
+                                logging.error(f"Error deleting file: {e}")
+                    
+                    if should_copy:
+                        try:
+                            copied_file = service.files().copy(
+                                fileId=item_id,
+                                body={'parents': [dest_parent_folder_id], 'name': item_name},
+                                supportsAllDrives=True,
+                                fields='id'
+                            ).execute()
+                            logging.info(f"{progress_str} {indent}  -> ✅ Copied file to your My Drive.")
+                        except HttpError as error:
+                            logging.error(f"{progress_str} {indent}  -> ❌ An error occurred copying file: {error}")
+
+            page_token = results.get('nextPageToken', None)
+            if page_token is None:
+                break
+        except HttpError as error:
+            logging.error(f"An error occurred: {error}")
+            time.sleep(5) # Wait before retrying on error
+
+def main():
+    """Main function to orchestrate the Drive transfer."""
+    global total_items
+    logging.info("--- Google Drive Fault-Tolerant Copy Script (Env-Friendly) ---")
+    
+    if not all([SOURCE_SHARED_FOLDER_ID, GDRIVE_CREDENTIALS_JSON]):
+        logging.error("\nERROR: Missing required environment variables.")
+        logging.error("Please ensure 'GDRIVE_SOURCE_FOLDER_ID' and 'GDRIVE_CREDENTIALS_JSON' are set in your .env file.")
+        return
+
+    service = authenticate_account()
+    logging.info("\nAccount authenticated successfully.")
+
+    logging.info("\n--- Pre-scan: Counting total files and folders... ---")
+    total_items = count_total_items(service, SOURCE_SHARED_FOLDER_ID)
+    logging.info(f"Found {total_items} total items to process.")
+
+    logging.info("\n--- Starting Resumable File and Folder Copy ---")
+    
+    copy_folder_recursively(service, SOURCE_SHARED_FOLDER_ID, DESTINATION_PARENT_ID)
+
+    logging.info("\n--- Copy Complete! ---")
+
+if __name__ == '__main__':
+    main()

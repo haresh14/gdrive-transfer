@@ -1,0 +1,12 @@
+# Environment variables
+.env
+
+# Google OAuth token
+token.pickle
+
+# Local credentials file (just in case)
+credentials.json
+
+# Python cache
+__pycache__/
+*.pyc
