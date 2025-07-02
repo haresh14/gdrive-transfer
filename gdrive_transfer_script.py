@@ -25,7 +25,8 @@ GDRIVE_CREDENTIALS_JSON = os.getenv('GDRIVE_CREDENTIALS_JSON')
 
 # Destination folder in 'My Drive'. 'root' is the top level.
 # Can be overridden with GDRIVE_DESTINATION_PARENT_ID environment variable.
-DESTINATION_PARENT_ID = os.getenv('GDRIVE_DESTINATION_PARENT_ID', 'root')
+_dest_env_var = os.getenv('GDRIVE_DESTINATION_PARENT_ID')
+DESTINATION_PARENT_ID = _dest_env_var.strip() if _dest_env_var and _dest_env_var.strip() else 'root'
 
 # Constants
 SCOPES = ['https://www.googleapis.com/auth/drive']
@@ -179,6 +180,11 @@ def authenticate_account():
 
 def find_existing_item(service, name, parent_id, mime_type):
     """Finds an existing file or folder by name and parent."""
+    # Validate parent_id
+    if not parent_id or parent_id.strip() == '':
+        logging.error(f"Invalid parent_id provided: '{parent_id}' for item '{name}'")
+        return None
+
     # Escape single quotes in the name for the query
     sanitized_name = name.replace("'", "\\'")
     query = f"'{parent_id}' in parents and name = '{sanitized_name}' and mimeType = '{mime_type}' and trashed = false"
@@ -192,7 +198,7 @@ def find_existing_item(service, name, parent_id, mime_type):
         files = response.get('files', [])
         return files[0] if files else None
     except HttpError as error:
-        logging.error(f"An error occurred while searching for item '{name}': {error}")
+        logging.error(f"An error occurred while searching for item '{name}' in parent '{parent_id}': {error}")
         return None
 
 def count_total_items(service, folder_id):
@@ -318,12 +324,24 @@ def main():
     logging.info(f"Log file: {LOG_FILE}")
     logging.info(f"Script started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
+    # Debug environment variables
+    logging.info(f"Environment variables loaded:")
+    logging.info(f"  GDRIVE_SOURCE_FOLDER_ID: {'SET' if SOURCE_SHARED_FOLDER_ID else 'NOT SET'}")
+    logging.info(f"  GDRIVE_CREDENTIALS_JSON: {'SET' if GDRIVE_CREDENTIALS_JSON else 'NOT SET'}")
+    logging.info(f"  GDRIVE_DESTINATION_PARENT_ID: '{os.getenv('GDRIVE_DESTINATION_PARENT_ID')}' -> resolved to '{DESTINATION_PARENT_ID}'")
+
     try:
         if not all([SOURCE_SHARED_FOLDER_ID, GDRIVE_CREDENTIALS_JSON]):
             logging.error("\nERROR: Missing required environment variables.")
             logging.error("Please ensure 'GDRIVE_SOURCE_FOLDER_ID' and 'GDRIVE_CREDENTIALS_JSON' are set in your .env file.")
             return
-        
+
+        # Validate destination parent ID
+        if not DESTINATION_PARENT_ID or DESTINATION_PARENT_ID.strip() == '':
+            logging.error("ERROR: DESTINATION_PARENT_ID is empty or invalid.")
+            logging.error("Please check your GDRIVE_DESTINATION_PARENT_ID environment variable.")
+            return
+
         logging.info(f"Source folder ID: {SOURCE_SHARED_FOLDER_ID}")
         logging.info(f"Destination parent ID: {DESTINATION_PARENT_ID} {'(root = My Drive top level)' if DESTINATION_PARENT_ID == 'root' else ''}")
 
