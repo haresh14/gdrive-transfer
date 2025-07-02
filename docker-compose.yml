@@ -8,6 +8,7 @@ services:
       # These should be set in your .env file
       - GDRIVE_SOURCE_FOLDER_ID=${GDRIVE_SOURCE_FOLDER_ID}
       - GDRIVE_CREDENTIALS_JSON=${GDRIVE_CREDENTIALS_JSON}
+      - GDRIVE_DESTINATION_PARENT_ID=${GDRIVE_DESTINATION_PARENT_ID}
     volumes:
       # Mount a local directory to persist logs and tokens
       - ./data:/app/data

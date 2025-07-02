@@ -24,7 +24,8 @@ SOURCE_SHARED_FOLDER_ID = os.getenv('GDRIVE_SOURCE_FOLDER_ID')
 GDRIVE_CREDENTIALS_JSON = os.getenv('GDRIVE_CREDENTIALS_JSON')
 
 # Destination folder in 'My Drive'. 'root' is the top level.
-DESTINATION_PARENT_ID = 'root'
+# Can be overridden with GDRIVE_DESTINATION_PARENT_ID environment variable.
+DESTINATION_PARENT_ID = os.getenv('GDRIVE_DESTINATION_PARENT_ID', 'root')
 
 # Constants
 SCOPES = ['https://www.googleapis.com/auth/drive']
@@ -322,6 +323,9 @@ def main():
             logging.error("\nERROR: Missing required environment variables.")
             logging.error("Please ensure 'GDRIVE_SOURCE_FOLDER_ID' and 'GDRIVE_CREDENTIALS_JSON' are set in your .env file.")
             return
+        
+        logging.info(f"Source folder ID: {SOURCE_SHARED_FOLDER_ID}")
+        logging.info(f"Destination parent ID: {DESTINATION_PARENT_ID} {'(root = My Drive top level)' if DESTINATION_PARENT_ID == 'root' else ''}")
 
         service = authenticate_account()
         logging.info("\nAccount authenticated successfully.")

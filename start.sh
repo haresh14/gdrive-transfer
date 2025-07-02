@@ -33,6 +33,7 @@ if [ ! -f ".env" ]; then
         echo "🔧 IMPORTANT: Please edit the .env file with your actual credentials:"
         echo "   - Set GDRIVE_SOURCE_FOLDER_ID to your Google Drive folder ID"
         echo "   - Set GDRIVE_CREDENTIALS_JSON to your Google Cloud credentials JSON"
+        echo "   - Set GDRIVE_DESTINATION_PARENT_ID to your Google Drive folder ID"
         echo ""
         echo "After editing .env, run this script again to start the container."
         exit 0

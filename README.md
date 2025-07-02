@@ -56,6 +56,15 @@ You need to tell the script which shared folder to copy.
     * *Example URL*: `https://drive.google.com/drive/folders/1a2b3c4d5e6f7g8h9i0j`
     * *Example ID*: `1a2b3c4d5e6f7g8h9i0j`
 
+### Step 3.5: Find the Destination Folder ID (Optional)
+
+By default, files will be copied to the root of your "My Drive". If you want to copy them to a specific folder:
+
+1.  In Google Drive, navigate to or create the destination folder in your "My Drive".
+2.  Open the destination folder.
+3.  Look at the URL and extract the Folder ID the same way as in Step 3.
+4.  Use this ID for the `GDRIVE_DESTINATION_PARENT_ID` environment variable.
+
 ### Step 4: Set Up Environment Variables (`.env` file)
 
 This is the most secure way to configure the script.
@@ -73,10 +82,13 @@ This is the most secure way to configure the script.
     ```env
     GDRIVE_SOURCE_FOLDER_ID="your_folder_id_here"
     GDRIVE_CREDENTIALS_JSON='{"web":{"client_id":"...", ...}}'
+    # Optional: Destination folder ID (defaults to 'root' if not set)
+    # GDRIVE_DESTINATION_PARENT_ID="your_destination_folder_id_here"
     ```
 4.  **Update the values**:
     * Replace `"your_folder_id_here"` with the Folder ID you found in Step 3.
     * Open the `credentials.json` file you downloaded, copy its **entire content**, and paste it inside the single quotes for `GDRIVE_CREDENTIALS_JSON`. It must be on a single line.
+    * (Optional) If you want to copy files to a specific folder in your My Drive instead of the root, uncomment and set `GDRIVE_DESTINATION_PARENT_ID` to the target folder's ID.
 
 ### Step 5: Install Dependencies
 
