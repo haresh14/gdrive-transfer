@@ -48,6 +48,9 @@ LOG_FILE = os.path.join(LOG_DIR, f'gdrive_copy_{timestamp}.log')
 CACHE_DIR = os.path.join(TOKEN_DIR, 'cache')
 FOLDER_COUNT_CACHE_FILE = os.path.join(CACHE_DIR, 'folder_counts.json')
 
+# Progress tracking cache file
+PROGRESS_CACHE_FILE = os.path.join(CACHE_DIR, 'progress_state.json')
+
 # Ensure all required directories exist
 def ensure_directories():
     """Create all required directories if they don't exist."""
@@ -90,6 +93,7 @@ ensure_directories()
 # --- Global variables for progress tracking ---
 total_items = 0
 processed_items = 0
+progress_state = {}  # Tracks processed items to avoid re-processing
 
 # --- Setup Logging ---
 # Configure logger to output to both console and a file
@@ -144,6 +148,55 @@ def cache_folder_count(folder_id, count):
         'timestamp': datetime.now().isoformat()
     }
     save_folder_count_cache(cache)
+
+def load_progress_state():
+    """Load the progress state from disk."""
+    try:
+        if os.path.exists(PROGRESS_CACHE_FILE):
+            with open(PROGRESS_CACHE_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        logging.warning(f"Could not load progress state: {e}")
+    return {}
+
+def save_progress_state(state):
+    """Save the progress state to disk."""
+    try:
+        with open(PROGRESS_CACHE_FILE, 'w') as f:
+            json.dump(state, f, indent=2)
+    except Exception as e:
+        logging.error(f"Could not save progress state: {e}")
+
+def get_item_key(item_id, parent_id):
+    """Generate a unique key for an item."""
+    return f"{item_id}:{parent_id}"
+
+def is_item_processed(item_id, parent_id):
+    """Check if an item has been processed."""
+    key = get_item_key(item_id, parent_id)
+    return key in progress_state
+
+def mark_item_processed(item_id, parent_id, item_name, item_type, status):
+    """Mark an item as processed."""
+    key = get_item_key(item_id, parent_id)
+    progress_state[key] = {
+        'name': item_name,
+        'type': item_type,
+        'status': status,
+        'timestamp': datetime.now().isoformat()
+    }
+
+    # Save progress state every 10 items to avoid frequent I/O
+    if len(progress_state) % 10 == 0:
+        save_progress_state(progress_state)
+
+def clear_progress_state():
+    """Clear the progress state (for fresh start)."""
+    global progress_state
+    progress_state = {}
+    if os.path.exists(PROGRESS_CACHE_FILE):
+        os.remove(PROGRESS_CACHE_FILE)
+    logging.info("Progress state cleared. Starting fresh.")
 
 def authenticate_account():
     """Authenticates the user and returns a Drive API service object."""
@@ -260,6 +313,21 @@ def copy_folder_recursively(service, source_folder_id, dest_parent_folder_id, in
                 item_mime_type = item['mimeType']
                 source_size = item.get('size')
 
+                # Check if this item has already been processed
+                if is_item_processed(item_id, dest_parent_folder_id):
+                    existing_status = progress_state[get_item_key(item_id, dest_parent_folder_id)]
+                    if item_mime_type == 'application/vnd.google-apps.folder':
+                        logging.info(f"{progress_str} {indent}📂 Skipping already processed folder: {item_name} (status: {existing_status['status']})")
+                        # Still need to recurse into the folder to process its contents
+                        if existing_status['status'] in ['created', 'existing']:
+                            # Find the destination folder ID to recurse into
+                            existing_folder = find_existing_item(service, item_name, dest_parent_folder_id, item_mime_type)
+                            if existing_folder:
+                                copy_folder_recursively(service, item_id, existing_folder['id'], indent_level + 1)
+                    else:
+                        logging.info(f"{progress_str} {indent}📄 Skipping already processed file: {item_name} (status: {existing_status['status']})")
+                    continue
+
                 if item_mime_type == 'application/vnd.google-apps.folder':
                     logging.info(f"{progress_str} {indent}📂 Processing folder: {item_name}")
                     existing_folder = find_existing_item(service, item_name, dest_parent_folder_id, item_mime_type)
@@ -267,11 +335,13 @@ def copy_folder_recursively(service, source_folder_id, dest_parent_folder_id, in
                     if existing_folder:
                         new_folder_id = existing_folder['id']
                         logging.info(f"{progress_str} {indent}  -> Found existing folder. Skipping creation.")
+                        mark_item_processed(item_id, dest_parent_folder_id, item_name, 'folder', 'existing')
                     else:
                         new_folder_metadata = {'name': item_name, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [dest_parent_folder_id]}
                         new_folder = service.files().create(body=new_folder_metadata, fields='id', supportsAllDrives=True).execute()
                         new_folder_id = new_folder.get('id')
                         logging.info(f"{progress_str} {indent}  -> ✅ Created new folder in your My Drive.")
+                        mark_item_processed(item_id, dest_parent_folder_id, item_name, 'folder', 'created')
 
                     copy_folder_recursively(service, item_id, new_folder_id, indent_level + 1)
 
@@ -287,6 +357,7 @@ def copy_folder_recursively(service, source_folder_id, dest_parent_folder_id, in
 
                         if existing_size_int == source_size_int:
                             logging.info(f"{progress_str} {indent}  -> File already exists with matching size. Skipping.")
+                            mark_item_processed(item_id, dest_parent_folder_id, item_name, 'file', 'existing')
                             should_copy = False
                         else:
                             logging.warning(f"{progress_str} {indent}  -> File exists with different size. Deleting and re-copying.")
@@ -304,8 +375,10 @@ def copy_folder_recursively(service, source_folder_id, dest_parent_folder_id, in
                                 fields='id'
                             ).execute()
                             logging.info(f"{progress_str} {indent}  -> ✅ Copied file to your My Drive.")
+                            mark_item_processed(item_id, dest_parent_folder_id, item_name, 'file', 'copied')
                         except HttpError as error:
                             logging.error(f"{progress_str} {indent}  -> ❌ An error occurred copying file: {error}")
+                            mark_item_processed(item_id, dest_parent_folder_id, item_name, 'file', 'error')
 
             page_token = results.get('nextPageToken', None)
             if page_token is None:
@@ -314,15 +387,43 @@ def copy_folder_recursively(service, source_folder_id, dest_parent_folder_id, in
             logging.error(f"An error occurred: {error}")
             time.sleep(5) # Wait before retrying on error
 
+    # Save progress state after processing each folder
+    save_progress_state(progress_state)
+
 def main():
     """Main function to orchestrate the Drive transfer."""
-    global total_items
+    global total_items, progress_state
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Google Drive Fault-Tolerant Copy Script')
     parser.add_argument('--force-rescan', action='store_true',
                        help='Force re-scanning of folder contents (ignore cache)')
+    parser.add_argument('--fresh-start', action='store_true',
+                       help='Clear progress state and start fresh (ignore previous progress)')
+    parser.add_argument('--show-progress', action='store_true',
+                       help='Show current progress state and exit')
     args = parser.parse_args()
+
+    # Handle show-progress command
+    if args.show_progress:
+        progress_state = load_progress_state()
+        if not progress_state:
+            print("No progress state found. No previous runs detected.")
+        else:
+            print(f"\nProgress State Summary:")
+            print(f"Total processed items: {len(progress_state)}")
+
+            status_counts = {}
+            for item_data in progress_state.values():
+                status = item_data['status']
+                status_counts[status] = status_counts.get(status, 0) + 1
+
+            print("\nStatus breakdown:")
+            for status, count in status_counts.items():
+                print(f"  {status}: {count}")
+
+            print(f"\nProgress cache file: {PROGRESS_CACHE_FILE}")
+        return
 
     logging.info("--- Google Drive Fault-Tolerant Copy Script (Env-Friendly) ---")
     logging.info(f"Log file: {LOG_FILE}")
@@ -333,6 +434,26 @@ def main():
     logging.info(f"  GDRIVE_SOURCE_FOLDER_ID: {'SET' if SOURCE_SHARED_FOLDER_ID else 'NOT SET'}")
     logging.info(f"  GDRIVE_CREDENTIALS_JSON: {'SET' if GDRIVE_CREDENTIALS_JSON else 'NOT SET'}")
     logging.info(f"  GDRIVE_DESTINATION_PARENT_ID: '{os.getenv('GDRIVE_DESTINATION_PARENT_ID')}' -> resolved to '{DESTINATION_PARENT_ID}'")
+
+    # Load or clear progress state
+    if args.fresh_start:
+        clear_progress_state()
+    else:
+        progress_state = load_progress_state()
+        if progress_state:
+            logging.info(f"\n--- Resuming from previous run ---")
+            logging.info(f"Found {len(progress_state)} previously processed items")
+
+            status_counts = {}
+            for item_data in progress_state.values():
+                status = item_data['status']
+                status_counts[status] = status_counts.get(status, 0) + 1
+
+            logging.info("Previous run status breakdown:")
+            for status, count in status_counts.items():
+                logging.info(f"  {status}: {count}")
+        else:
+            logging.info("\n--- Starting fresh (no previous progress found) ---")
 
     try:
         if not all([SOURCE_SHARED_FOLDER_ID, GDRIVE_CREDENTIALS_JSON]):
@@ -374,15 +495,23 @@ def main():
 
         copy_folder_recursively(service, SOURCE_SHARED_FOLDER_ID, DESTINATION_PARENT_ID)
 
+        # Final save of progress state
+        save_progress_state(progress_state)
         logging.info("\n--- Copy Complete! ---")
 
     except KeyboardInterrupt:
         logging.warning("\n--- Script interrupted by user (Ctrl+C) ---")
         logging.info(f"Progress: {processed_items}/{total_items} items processed")
+        # Save progress state on interruption
+        save_progress_state(progress_state)
+        logging.info("Progress state saved. You can resume by running the script again.")
     except Exception as e:
         logging.error(f"\n--- Unexpected error occurred ---")
         logging.error(f"Error: {str(e)}")
         logging.error(f"Progress: {processed_items}/{total_items} items processed")
+        # Save progress state on error
+        save_progress_state(progress_state)
+        logging.info("Progress state saved. You can resume by running the script again.")
         raise
 
 if __name__ == '__main__':

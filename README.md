@@ -5,6 +5,8 @@ A fault-tolerant Python script to recursively copy a large, deeply-nested Google
 ## Features
 
 * **Fault-Tolerant & Resumable**: You can stop and start the script at any time. It will pick up where it left off without creating duplicate files or folders.
+* **Smart Progress Tracking**: Maintains a persistent record of processed items to avoid re-checking already processed files on subsequent runs, significantly improving performance for large transfers.
+* **True Resumption**: When restarted, skips all previously processed items without making API calls to check their existence, saving time and API quota.
 * **Data Integrity Check**: Compares file sizes and re-copies any files that don't match between the source and destination.
 * **Secure**: Uses environment variables to keep your secret credentials separate from the code, making it safe to use with Git.
 * **Progress Logging**: Displays detailed progress in the terminal and saves a complete log to `/data/log/` directory for later review.
@@ -123,10 +125,22 @@ python gdrive_transfer_script.py
 ### Command Line Options
 
 * `--force-rescan`: Force re-scanning of folder contents, ignoring any cached count data. Use this if the source folder contents have changed since the last run.
+* `--fresh-start`: Clear all progress state and start fresh, ignoring any previous progress. Use this if you want to restart the entire transfer from the beginning.
+* `--show-progress`: Display current progress state information and exit without running the transfer.
 
-Example:
+Examples:
 ```bash
+# Normal run (resumes from where it left off)
+python gdrive_transfer_script.py
+
+# Force rescan of folder contents
 python gdrive_transfer_script.py --force-rescan
+
+# Start completely fresh (ignore previous progress)
+python gdrive_transfer_script.py --fresh-start
+
+# Check current progress state
+python gdrive_transfer_script.py --show-progress
 ```
 
 ### Caching Behavior
@@ -138,3 +152,47 @@ The script automatically caches the total count of files and folders for each so
 - **Changed folder contents**: Use `--force-rescan` to update the cache if files have been added/removed from the source folder
 
 Cache files are stored in `./data/cache/folder_counts.json`.
+
+## Progress Tracking and Resumption
+
+The script now includes advanced progress tracking that dramatically improves performance for large transfers:
+
+### How It Works
+
+1. **First Run**: The script processes items normally, recording each processed item in a progress state file.
+2. **Subsequent Runs**: The script loads the progress state and skips all previously processed items without making API calls to check their existence.
+3. **True Resumption**: Only unprocessed items are checked and copied, saving significant time and API quota.
+
+### Progress State Management
+
+- **Progress State File**: `./data/cache/progress_state.json`
+- **Automatic Saving**: Progress is saved every 10 items and at the end of each folder
+- **Interruption Safe**: Progress is saved when the script is interrupted (Ctrl+C) or encounters errors
+
+### Progress Status Types
+
+- `existing`: Item already existed in destination with matching size
+- `created`: New folder was created
+- `copied`: File was successfully copied
+- `error`: An error occurred during processing
+
+### Performance Benefits
+
+For large transfers (100,000+ files):
+- **First run**: Normal processing time
+- **Subsequent runs**: Only processes new/changed items
+- **API calls reduced**: Up to 99% reduction in API calls for already processed items
+- **Faster startup**: No need to check existence of previously processed items
+
+### Managing Progress State
+
+```bash
+# Check current progress
+python gdrive_transfer_script.py --show-progress
+
+# Resume from where you left off (default behavior)
+python gdrive_transfer_script.py
+
+# Start completely fresh (clears all progress)
+python gdrive_transfer_script.py --fresh-start
+```

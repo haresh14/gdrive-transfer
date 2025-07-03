@@ -123,6 +123,24 @@ docker-compose restart
 docker-compose run --rm gdrive-transfer
 ```
 
+### Command Line Options
+
+You can pass command line arguments to the script when using Docker:
+
+```bash
+# Normal run (resumes from where it left off)
+docker-compose run --rm gdrive-transfer
+
+# Force rescan of folder contents
+docker-compose run --rm gdrive-transfer --force-rescan
+
+# Start completely fresh (ignore previous progress)
+docker-compose run --rm gdrive-transfer --fresh-start
+
+# Check current progress state
+docker-compose run --rm gdrive-transfer --show-progress
+```
+
 ### Normal Run (Container stops after completion)
 ```bash
 # Container will stop automatically when transfer completes
