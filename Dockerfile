@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the application code
 COPY gdrive_transfer_script.py .
+COPY gdrive_size_calculator.py .
 
 # Create directory for persistent data (logs, tokens)
 RUN mkdir -p /app/data
@@ -31,5 +32,5 @@ VOLUME ["/app/data"]
 # Expose port for OAuth callback (Google Auth needs this)
 EXPOSE 8425
 
-# Command to run the script
-CMD ["python", "gdrive_transfer_script.py"] 
+# Keep container running without executing the script
+CMD ["tail", "-f", "/dev/null"] 

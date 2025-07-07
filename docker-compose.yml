@@ -14,6 +14,7 @@ services:
       - ./data:/app/data
       # Mount the script for development (optional, comment out for production)
       - ./gdrive_transfer_script.py:/app/gdrive_transfer_script.py:ro
+      - ./gdrive_size_calculator.py:/app/gdrive_size_calculator.py:ro
     ports:
       # Map port for OAuth authentication
       - "8425:8425"

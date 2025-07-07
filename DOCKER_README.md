@@ -44,29 +44,15 @@ Create a directory to persist logs and authentication tokens:
 mkdir data
 ```
 
-### 4. Build and Run
+### 4. Build and Start Container
 
-Build Image
-```bash
-docker-compose --build
-```
-
-Start container
-```bash
-docker-compose run --rm gdrive-transfer
-```
-
-Build and start the container togather:
-
-```bash
-docker-compose up --build
-```
-
-Or run in detached mode:
+Build and start the container:
 
 ```bash
 docker-compose up --build -d
 ```
+
+The container will start and keep running without executing the Python script automatically. You can then run the script manually when needed.
 
 ## Authentication Process
 
@@ -74,14 +60,16 @@ docker-compose up --build -d
 
 On the first run, you'll need to authenticate with Google:
 
-1. The script will start and display a message about authentication
-2. Since Docker doesn't have a browser, you'll see an authorization URL in the logs
-3. Copy the authorization URL from the logs
-4. Open the URL in your browser (on your host machine)
-5. Complete the Google OAuth flow
-6. After authorization, Google will redirect to a localhost URL (like `http://localhost:8425/?code=...`)
-7. Copy the entire redirect URL and paste it back into the container when prompted
-8. The authentication token will be saved in `./data/token.pickle`
+1. Start the container: `docker-compose up --build -d`
+2. Run the script manually: `docker-compose exec gdrive-transfer python gdrive_transfer_script.py` or `docker-compose exec gdrive-transfer python gdrive_size_calculator.py`
+3. The script will display a message about authentication
+4. Since Docker doesn't have a browser, you'll see an authorization URL in the output
+5. Copy the authorization URL from the output
+6. Open the URL in your browser (on your host machine)
+7. Complete the Google OAuth flow
+8. After authorization, Google will redirect to a localhost URL (like `http://localhost:8425/?code=...`)
+9. Copy the entire redirect URL and paste it back into the container when prompted
+10. The authentication token will be saved in `./data/token.pickle`
 
 **Example flow:**
 ```
@@ -97,6 +85,20 @@ Paste the full redirect URL here: http://localhost:8425/?code=4/0AdQt8qh...
 After the first authentication, the script will reuse the saved token automatically.
 
 ## Docker Commands
+
+### Execute Python Script
+Since the container runs continuously without executing the script automatically, you need to run it manually:
+
+```bash
+# Run the transfer script inside the running container
+docker-compose exec gdrive-transfer python gdrive_transfer_script.py
+```
+
+### Access Container Shell
+```bash
+# Access the container shell for interactive use
+docker-compose exec gdrive-transfer bash
+```
 
 ### View Logs
 ```bash
@@ -117,39 +119,22 @@ docker-compose down
 docker-compose restart
 ```
 
-### Run One-Time Transfer
-```bash
-# Run and remove container after completion (recommended for single transfers)
-docker-compose run --rm gdrive-transfer
-```
-
 ### Command Line Options
 
-You can pass command line arguments to the script when using Docker:
+You can pass command line arguments to the script when running it manually inside the container:
 
 ```bash
 # Normal run (resumes from where it left off)
-docker-compose run --rm gdrive-transfer
+docker-compose exec gdrive-transfer python gdrive_transfer_script.py
 
 # Force rescan of folder contents
-docker-compose run --rm gdrive-transfer --force-rescan
+docker-compose exec gdrive-transfer python gdrive_transfer_script.py --force-rescan
 
 # Start completely fresh (ignore previous progress)
-docker-compose run --rm gdrive-transfer --fresh-start
+docker-compose exec gdrive-transfer python gdrive_transfer_script.py --fresh-start
 
 # Check current progress state
-docker-compose run --rm gdrive-transfer --show-progress
-```
-
-### Normal Run (Container stops after completion)
-```bash
-# Container will stop automatically when transfer completes
-docker-compose up --build
-```
-
-### Access Container Shell
-```bash
-docker-compose exec gdrive-transfer bash
+docker-compose exec gdrive-transfer python gdrive_transfer_script.py --show-progress
 ```
 
 ## File Structure
@@ -219,11 +204,14 @@ Common issues:
 If you need to change environment variables (like switching to a different folder):
 
 1. **Edit the `.env` file** with your new values
-2. **Run the container directly** - no extra steps needed:
+2. **Restart the container** to pick up the new environment variables:
    ```bash
-   docker-compose run --rm gdrive-transfer
+   docker-compose restart
    ```
-3. **The container automatically uses updated environment variables**
+3. **Run the script manually** with the updated environment variables:
+   ```bash
+   docker-compose exec gdrive-transfer python gdrive_transfer_script.py
+   ```
 
 **Important Notes:**
 - Environment variables update automatically - no rebuild required
@@ -236,8 +224,11 @@ If you need to change environment variables (like switching to a different folde
 # 1. Change folder ID in .env file
 GDRIVE_SOURCE_FOLDER_ID="new_folder_id_here"
 
-# 2. Run immediately - uses new folder ID
-docker-compose run --rm gdrive-transfer
+# 2. Restart container to pick up new environment variables
+docker-compose restart
+
+# 3. Run script with new folder ID
+docker-compose exec gdrive-transfer python gdrive_transfer_script.py
 ```
 
 ### Updating Python Code
@@ -249,15 +240,14 @@ If you modify the Python script (`gdrive_transfer_script.py`), you need to rebui
    ```bash
    docker-compose build
    ```
-3. **Run with the updated code**:
+3. **Restart the container** with the updated code:
    ```bash
-   docker-compose run --rm gdrive-transfer
+   docker-compose up --build -d
    ```
-
-**Alternative (rebuild and run in one step):**
-```bash
-docker-compose up --build
-```
+4. **Run the script manually** with the updated code:
+   ```bash
+   docker-compose exec gdrive-transfer python gdrive_transfer_script.py
+   ```
 
 **Development Tip:**
 The `docker-compose.yml` includes a development volume mount that allows you to edit the Python file without rebuilding:
@@ -268,7 +258,7 @@ The `docker-compose.yml` includes a development volume mount that allows you to 
 
 With this mount active, you can:
 1. Edit `gdrive_transfer_script.py` locally
-2. Run `docker-compose run --rm gdrive-transfer` (no rebuild needed)
+2. Run `docker-compose exec gdrive-transfer python gdrive_transfer_script.py` (no rebuild needed)
 3. The container uses your updated code immediately
 
 **For production**, comment out or remove the development volume mount and always rebuild after code changes.
