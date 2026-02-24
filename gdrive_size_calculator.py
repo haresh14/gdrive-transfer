@@ -153,7 +153,7 @@ def authenticate_account():
             flow = InstalledAppFlow.from_client_config(client_config, SCOPES)
             # Use port 8426 for size calculator to avoid conflicts
             try:
-                creds = flow.run_local_server(port=8426, bind_addr='0.0.0.0', open_browser=False)
+                creds = flow.run_local_server(port=8425, bind_addr='0.0.0.0', open_browser=False)
             except Exception as e:
                 logging.error(f"Failed to run local server: {e}")
                 logging.info("Please visit the following URL to authorize the application:")
